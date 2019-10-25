@@ -12,71 +12,78 @@ NewDATA <- read.csv("CN_BRP_CoastalVeg_NewDATA.csv")#Sampel CV-163 was deemd "NA
 NewDATA <- NewDATA [ !is.na(NewDATA$site),] #remove NA-s
 NewDATA <- NewDATA [ !is.na(NewDATA$C.percent),] #remove NA-s
 NewDATA$C.percent <- ifelse(NewDATA$C.percent == 0, 0.001, NewDATA$C.percent)#convert 0 into 0.001 to run log-models
-NewDATA$C_Round <- round(NewDATA$C.percent, 0) #round % to full numbers to run Poisson
 NewDATA$SliceLength.cm <- (NewDATA$DepthTo_cm - NewDATA$DepthFrom_cm) #round % to full numbers to run Poisson
 NewDATA$SampleVolume.cm3 <- (pi*(NewDATA$PipeDiameter_cm/2)^2)*NewDATA$SliceLength.cm  #slice volume
 NewDATA$CarbonDensity.gcm3 <- NewDATA$dry_bulk_density.gcm3 * NewDATA$C.percent/100
 NewDATA$CarbonStock.Mgha <- (((NewDATA$CarbonDensity.gcm3  / 1000000 ) *100000000) * NewDATA$SliceLength.cm )
-NewDATA$CarbonStock.Mgha_ROUND <- round(NewDATA$CarbonStock.Mgha, 0)
+NewDATA$Core_in.mm <- (NewDATA$PipeLength_cm *10) - NewDATA$Cmptn_in_mm 
+NewDATA$Pipe_in.mm <- (NewDATA$PipeLength_cm *10) - NewDATA$Cmptn_out_mm 
+NewDATA$Compaction_Correction_Value<- NewDATA$Core_in.mm/NewDATA$Pipe_in.mm
+NewDATA$CarbonStock.Mgha_CORRECTED <- NewDATA$CarbonStock.Mgha * NewDATA$Compaction_Correction_Value
+NewDATA$DepthCorrected = NewDATA$DepthTo_cm/ NewDATA$Compaction_Correction_Value
+NewDATA$DepthChange = NewDATA$DepthCorrected - NewDATA$DepthTo_cm
+NewDATA$DepthChangePerc = 100-(NewDATA$DepthChange/NewDATA$DepthTo_cm *100) #Percent increase in depth
+NewDATA$CorrectedCarbonStock.Mgha = NewDATA$CarbonStock.Mgha * NewDATA$DepthChangePerc / 100
+  
+range(NewDATA$Compaction_Correction_Value)# Check if all values are  below 1 = 0.5342903 0.9970760
+range(NewDATA$CarbonStock.Mgha )# 0.004913885 68.634732232
+range( NewDATA$CarbonStock.Mgha_CORRECTED )# 0.002771935 62.071168539
+range(NewDATA$CorrectedCarbonStock.Mgha)
 
-###########################################################
+
+#CORRECTED C-stock to account for compaction:#################
 
 #Analyze  Coastal Veg DATA from Avalon ======
 #Gamma Model:
-CN_gamma <- glmer(CarbonStock.Mgha ~ habitat  +DepthRange.cm +
+CN_gamma <- glmer(CarbonStock.Mgha_CORRECTED ~ habitat  +DepthRange.cm +
                     (1|core) + (1|site) ,
                   family = Gamma(link = "inverse"), data=NewDATA)
 summary(CN_gamma)
 plot(resid(CN_gamma))
 
 #Linear Model:
-CN_lm <- lm(CarbonStock.Mgha ~ habitat  +DepthRange.cm , data = NewDATA)
-summary(CN_lm)
+CN_lm <- lm(CarbonStock.Mgha_CORRECTED ~ habitat  +DepthRange.cm , data = NewDATA)
+hist(NewDATA$CarbonStock.Mgha_CORRECTED)
 plot(resid(CN_lm))
 
 #Linear Model on Site effect:
-CN_lm_site <- lm(CarbonStock.Mgha ~ site , data = NewDATA)
+CN_lm_site <- lm(CarbonStock.Mgha_CORRECTED ~ site , data = NewDATA)
 summary(CN_lm_site)
 plot(resid(CN_lm_site))
 
 #Linear Model on SiteNumber effect:
-CN_lm_siteNum <- lm(CarbonStock.Mgha ~ as.factor(SiteNumber) , data = NewDATA)
+CN_lm_siteNum <- lm(CarbonStock.Mgha_CORRECTED ~ as.factor(SiteNumber) , data = NewDATA)
 summary(CN_lm_siteNum)
 plot(resid(CN_lm_siteNum))
 
-
 #Log-Linear Model:
-CN_log_lm <- lm(log(CarbonStock.Mgha) ~ habitat + DepthRange.cm , data = NewDATA)
+CN_log_lm <- lm(log(CarbonStock.Mgha_CORRECTED) ~ habitat + DepthRange.cm , data = NewDATA)
 summary(CN_log_lm)
 plot(resid(CN_log_lm))
 
 #Gaussian glmm distribution:=
-CN_log_lmer1 <- lmer(log(CarbonStock.Mgha) ~ habitat+ DepthRange.cm   +
+CN_log_lmer1 <- lmer(log(CarbonStock.Mgha_CORRECTED) ~ habitat+ DepthRange.cm   +
                    (1|site)  , data=NewDATA)
 
 summary(CN_log_lmer1)
 plot(resid(CN_log_lmer1))
+
 #TABLE:
 tab_model(CN_log_lmer1)
+tab_model(CN_lm)
 
 
 #Gaussian glmm distribution no depths:=
-CN_log_lmer2 <- lmer(log(CarbonStock.Mgha) ~ habitat  +
+CN_log_lmer2 <- lmer(log(CarbonStock.Mgha_CORRECTED) ~ habitat  +
                    (1|site) +(1|DepthRange.cm ),
                  data=NewDATA)
 
-
-
-#Poisson Model:
-range(NewDATA$C_Round )# 0 26
-CN_poisson <- glmer(CarbonStock.Mgha_ROUND  ~ habitat + DepthRange.cm + 
-                      (1|core) + (1|site),
-                    family = poisson(link="log"), data=NewDATA)
-summary(CN_poisson)
-plot(resid(CN_poisson))
-
 #Compare all models:
-AIC(CN_poisson,CN_gamma,CN_lm,CN_log_lm, CN_log_lmer1,CN_log_lmer2 )
+AIC(CN_gamma,CN_lm,CN_log_lm, CN_log_lmer1,CN_log_lmer2 )
+
+
+
+
 
 
 #MERGE Coastal Veg DATA from Avalon ======
@@ -121,10 +128,13 @@ summary(CN_lmer2)
 plot(resid(CN_lmer2))
 
 #Compare all models:
-AIC(CN_poisson2,CN_gamma2,CN_lm2, CN_log_lm2, CN_lmer_log2,CN_lmer2 )
+AIC(CN_gamma2,CN_lm2, CN_log_lm2, CN_lmer_log2,CN_lmer2 )
+
 
 #Draw a Stats Table:
 tab_model(CN_lmer_log2)
+tab_model(CN_gamma)
+tab_model(CN_lm2)
 
 
 #Plot by by habitat
